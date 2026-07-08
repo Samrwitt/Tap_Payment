@@ -102,20 +102,15 @@ func (c *Client) CreateCharge(ctx context.Context, req CreateChargeRequest) (*Cr
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &out, fmt.Errorf("tap create charge failed: status=%d code=%s message=%s", resp.StatusCode, safeStr(out.Response, func(r *struct {
-			Code, Message string
-		}) string { return r.Code }), safeStr(out.Response, func(r *struct {
-			Code, Message string
-		}) string { return r.Message }))
+		code := ""
+		msg := ""
+		if out.Response != nil {
+			code = out.Response.Code
+			msg = out.Response.Message
+		}
+		return &out, fmt.Errorf("tap create charge failed: status=%d code=%s message=%s", resp.StatusCode, code, msg)
 	}
 
 	return &out, nil
-}
-
-func safeStr[T any](p *T, f func(*T) string) string {
-	if p == nil {
-		return ""
-	}
-	return f(p)
 }
 
