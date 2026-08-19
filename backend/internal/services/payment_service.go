@@ -61,7 +61,8 @@ var (
 )
 
 var isoCurrencyCodeRe = regexp.MustCompile(`^[A-Z]{3}$`)
-var phoneDigitsRe = regexp.MustCompile(`^[0-9]{6,15}$`)
+var countryCodeDigitsRe = regexp.MustCompile(`^[0-9]{1,3}$`)
+var phoneNumberDigitsRe = regexp.MustCompile(`^[0-9]{6,15}$`)
 
 func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInput) (*CreateChargeOutput, error) {
 	if err := validateCreateChargeInput(&in); err != nil {
@@ -173,11 +174,11 @@ func validateCreateChargeInput(in *CreateChargeInput) error {
 		return fmt.Errorf("%w: currency must be a 3-letter ISO code", ErrInvalidInput)
 	case in.Customer.Phone.CountryCode == "":
 		return fmt.Errorf("%w: customer.phone.countryCode is required", ErrInvalidInput)
-	case !phoneDigitsRe.MatchString(in.Customer.Phone.CountryCode):
+	case !countryCodeDigitsRe.MatchString(in.Customer.Phone.CountryCode):
 		return fmt.Errorf("%w: customer.phone.countryCode must be digits only", ErrInvalidInput)
 	case in.Customer.Phone.Number == "":
 		return fmt.Errorf("%w: customer.phone.number is required", ErrInvalidInput)
-	case !phoneDigitsRe.MatchString(in.Customer.Phone.Number):
+	case !phoneNumberDigitsRe.MatchString(in.Customer.Phone.Number):
 		return fmt.Errorf("%w: customer.phone.number must be digits only and 6-15 chars", ErrInvalidInput)
 	}
 
