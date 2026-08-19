@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -47,14 +46,14 @@ func (h *Handlers) CreateCharge(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) TapWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "read body failed")
+		writeError(w, http.StatusBadRequest, "INVALID_BODY", "read body failed")
 		return
 	}
 	defer r.Body.Close()
 
 	var ch tap.WebhookCharge
 	if err := json.Unmarshal(body, &ch); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid json")
 		return
 	}
 
@@ -85,7 +84,7 @@ func (h *Handlers) TapWebhook(w http.ResponseWriter, r *http.Request) {
 	status := strings.ToLower(ch.Status)
 	updatedAt := receivedAt
 	raw := string(body)
-	_, _ = h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		UPDATE payments SET status=?, raw_last_event=?, updated_at=?
 		WHERE provider='tap' AND provider_payment_id=?
 	`, status, raw, updatedAt, ch.ID)
@@ -96,7 +95,7 @@ func (h *Handlers) TapWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// If captured, mark order paid (best effort).
 	if ch.Status == "CAPTURED" {
-		_, _ = h.db.ExecContext(r.Context(), `
+		_, err = h.db.ExecContext(r.Context(), `
 			UPDATE orders SET status='paid', updated_at=?
 			WHERE id IN (SELECT order_id FROM payments WHERE provider='tap' AND provider_payment_id=?)
 		`, updatedAt, ch.ID)
