@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"tap-payment/backend/internal/providers/tap"
@@ -54,15 +56,16 @@ type CreateChargeOutput struct {
 	Status           string `json:"status"`
 }
 
+var (
+	ErrInvalidInput = errors.New("invalid input")
+)
+
+var isoCurrencyCodeRe = regexp.MustCompile(`^[A-Z]{3}$`)
+var phoneDigitsRe = regexp.MustCompile(`^[0-9]{6,15}$`)
+
 func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInput) (*CreateChargeOutput, error) {
-	if in.OrderID == "" {
-		return nil, errors.New("orderId is required")
-	}
-	if in.Amount <= 0 {
-		return nil, errors.New("amount must be > 0")
-	}
-	if in.Currency == "" {
-		return nil, errors.New("currency is required")
+	if err := validateCreateChargeInput(&in); err != nil {
+		return nil, err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -148,6 +151,37 @@ func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInp
 		RedirectURL:      tapResp.Transaction.URL,
 		Status:           tapResp.Status,
 	}, nil
+}
+
+func validateCreateChargeInput(in *CreateChargeInput) error {
+	in.OrderID = strings.TrimSpace(in.OrderID)
+	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
+	in.Customer.Email = strings.TrimSpace(in.Customer.Email)
+	in.Customer.FirstName = strings.TrimSpace(in.Customer.FirstName)
+	in.Customer.LastName = strings.TrimSpace(in.Customer.LastName)
+	in.Customer.Phone.CountryCode = strings.TrimPrefix(strings.TrimSpace(in.Customer.Phone.CountryCode), "+")
+	in.Customer.Phone.Number = strings.TrimSpace(in.Customer.Phone.Number)
+
+	switch {
+	case in.OrderID == "":
+		return fmt.Errorf("%w: orderId is required", ErrInvalidInput)
+	case in.Amount <= 0:
+		return fmt.Errorf("%w: amount must be > 0", ErrInvalidInput)
+	case in.Currency == "":
+		return fmt.Errorf("%w: currency is required", ErrInvalidInput)
+	case !isoCurrencyCodeRe.MatchString(in.Currency):
+		return fmt.Errorf("%w: currency must be a 3-letter ISO code", ErrInvalidInput)
+	case in.Customer.Phone.CountryCode == "":
+		return fmt.Errorf("%w: customer.phone.countryCode is required", ErrInvalidInput)
+	case !phoneDigitsRe.MatchString(in.Customer.Phone.CountryCode):
+		return fmt.Errorf("%w: customer.phone.countryCode must be digits only", ErrInvalidInput)
+	case in.Customer.Phone.Number == "":
+		return fmt.Errorf("%w: customer.phone.number is required", ErrInvalidInput)
+	case !phoneDigitsRe.MatchString(in.Customer.Phone.Number):
+		return fmt.Errorf("%w: customer.phone.number must be digits only and 6-15 chars", ErrInvalidInput)
+	}
+
+	return nil
 }
 
 func mergeMetadata(a, b map[string]string) map[string]string {
