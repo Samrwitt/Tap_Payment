@@ -1,0 +1,9 @@
+data/
+.env
+.env.*
+bin/
+dist/
+src/
+node_modules/
+.git/
+
