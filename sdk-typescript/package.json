@@ -1,0 +1,9 @@
+{
+  "name": "@tap-payment/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {},
+  "description": "TypeScript client for Tap Payments API (manual SDK matching openapi/payments.yaml)."
+}
+
