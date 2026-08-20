@@ -10,36 +10,36 @@ import (
 	"strings"
 	"time"
 
-	"tap-payment/backend/internal/providers/tap"
+	"tap-payment/backend/internal/providers"
 )
 
 type PaymentServiceConfig struct {
-	BaseURL       string
-	TapWebhookURL string
+	BaseURL    string
+	WebhookURL string
 }
 
 type PaymentService struct {
 	db       *sql.DB
-	tap      *tap.Client
+	provider providers.Provider
 	cfg      PaymentServiceConfig
 }
 
-func NewPaymentService(db *sql.DB, tapClient *tap.Client, cfg PaymentServiceConfig) *PaymentService {
-	return &PaymentService{db: db, tap: tapClient, cfg: cfg}
+func NewPaymentService(db *sql.DB, provider providers.Provider, cfg PaymentServiceConfig) *PaymentService {
+	return &PaymentService{db: db, provider: provider, cfg: cfg}
 }
 
 type CreateChargeInput struct {
-	OrderID   string            `json:"orderId"`
-	Amount    float64           `json:"amount"`
-	Currency  string            `json:"currency"`
-	Customer  CustomerInput     `json:"customer"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	OrderID  string            `json:"orderId"`
+	Amount   float64           `json:"amount"`
+	Currency string            `json:"currency"`
+	Customer CustomerInput     `json:"customer"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 type CustomerInput struct {
-	FirstName string `json:"firstName,omitempty"`
-	LastName  string `json:"lastName,omitempty"`
-	Email     string `json:"email,omitempty"`
+	FirstName string     `json:"firstName,omitempty"`
+	LastName  string     `json:"lastName,omitempty"`
+	Email     string     `json:"email,omitempty"`
 	Phone     PhoneInput `json:"phone"`
 }
 
@@ -64,13 +64,14 @@ var isoCurrencyCodeRe = regexp.MustCompile(`^[A-Z]{3}$`)
 var countryCodeDigitsRe = regexp.MustCompile(`^[0-9]{1,3}$`)
 var phoneNumberDigitsRe = regexp.MustCompile(`^[0-9]{6,15}$`)
 
-func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInput) (*CreateChargeOutput, error) {
+func (s *PaymentService) CreateCharge(ctx context.Context, in CreateChargeInput) (*CreateChargeOutput, error) {
 	if err := validateCreateChargeInput(&in); err != nil {
 		return nil, err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	paymentID := "pay_" + randID()
+	providerName := s.provider.Name()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -78,7 +79,6 @@ func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInp
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Upsert order if not exists; keep status pending.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO orders (id, amount, currency, status, created_at, updated_at)
 		VALUES (?, ?, ?, 'pending', ?, ?)
@@ -93,50 +93,41 @@ func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInp
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO payments (id, order_id, provider, status, created_at, updated_at)
-		VALUES (?, ?, 'tap', 'initiated', ?, ?)
-	`, paymentID, in.OrderID, now, now)
+		VALUES (?, ?, ?, 'initiated', ?, ?)
+	`, paymentID, in.OrderID, providerName, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("insert payment: %w", err)
 	}
 
-	// Create charge at Tap.
-	tapReq := tap.CreateChargeRequest{
-		Amount:            in.Amount,
-		Currency:          in.Currency,
-		CustomerInitiated: true,
-		ThreeDSecure:      true,
-		Description:       "Order " + in.OrderID,
-		Metadata:          mergeMetadata(in.Metadata, map[string]string{"orderId": in.OrderID, "paymentId": paymentID}),
-		Customer: tap.CreateChargeCustomer{
+	result, err := s.provider.CreateCharge(ctx, providers.ChargeRequest{
+		PaymentID:   paymentID,
+		OrderID:     in.OrderID,
+		Amount:      in.Amount,
+		Currency:    in.Currency,
+		Description: "Order " + in.OrderID,
+		Metadata:    mergeMetadata(in.Metadata, map[string]string{"orderId": in.OrderID, "paymentId": paymentID}),
+		Customer: providers.Customer{
 			FirstName: in.Customer.FirstName,
 			LastName:  in.Customer.LastName,
 			Email:     in.Customer.Email,
-			Phone: tap.PhoneNumber{
+			Phone: providers.Phone{
 				CountryCode: in.Customer.Phone.CountryCode,
 				Number:      in.Customer.Phone.Number,
 			},
 		},
-		Source: tap.CreateChargeSource{ID: "src_all"},
-		Redirect: tap.CreateChargeRedirect{
-			URL: s.cfg.BaseURL + "/payment/return", // placeholder; frontend will supply later
-		},
-		Post: &tap.CreateChargePost{URL: s.cfg.TapWebhookURL},
-		Reference: map[string]string{
-			"order": in.OrderID,
-		},
-	}
-
-	tapResp, err := s.tap.CreateCharge(ctx, tapReq)
+		RedirectURL: s.cfg.BaseURL + "/payment/return",
+		WebhookURL:  s.cfg.WebhookURL,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	raw, _ := json.Marshal(tapResp)
+	raw, _ := json.Marshal(result.Raw)
 	_, err = tx.ExecContext(ctx, `
 		UPDATE payments
 		SET provider_payment_id=?, redirect_url=?, raw_last_event=?, updated_at=?
 		WHERE id=?
-	`, tapResp.ID, tapResp.Transaction.URL, string(raw), now, paymentID)
+	`, result.ProviderChargeID, result.RedirectURL, string(raw), now, paymentID)
 	if err != nil {
 		return nil, fmt.Errorf("update payment: %w", err)
 	}
@@ -147,10 +138,10 @@ func (s *PaymentService) CreateTapCharge(ctx context.Context, in CreateChargeInp
 
 	return &CreateChargeOutput{
 		PaymentID:        paymentID,
-		Provider:         "tap",
-		ProviderChargeID: tapResp.ID,
-		RedirectURL:      tapResp.Transaction.URL,
-		Status:           tapResp.Status,
+		Provider:         providerName,
+		ProviderChargeID: result.ProviderChargeID,
+		RedirectURL:      result.RedirectURL,
+		Status:           result.Status,
 	}, nil
 }
 
@@ -195,4 +186,3 @@ func mergeMetadata(a, b map[string]string) map[string]string {
 	}
 	return out
 }
-

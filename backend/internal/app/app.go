@@ -3,7 +3,9 @@ package app
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +13,8 @@ import (
 
 	"tap-payment/backend/internal/db"
 	"tap-payment/backend/internal/httpapi"
+	"tap-payment/backend/internal/providers"
+	"tap-payment/backend/internal/providers/mock"
 	"tap-payment/backend/internal/providers/tap"
 	"tap-payment/backend/internal/services"
 )
@@ -30,15 +34,25 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 
-	tapClient := tap.NewClient(cfg.TapSecretKey)
+	provider, err := newProvider(cfg)
+	if err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+
 	tapWebhookSecret := cfg.TapWebhookSecretKey
 	if tapWebhookSecret == "" {
 		tapWebhookSecret = cfg.TapSecretKey
 	}
 
-	svc := services.NewPaymentService(database, tapClient, services.PaymentServiceConfig{
-		BaseURL:       cfg.BaseURL,
-		TapWebhookURL: cfg.TapWebhookURL,
+	webhookURL := cfg.TapWebhookURL
+	if webhookURL == "" {
+		webhookURL = cfg.BaseURL + "/api/payments/webhooks/tap"
+	}
+
+	svc := services.NewPaymentService(database, provider, services.PaymentServiceConfig{
+		BaseURL:    cfg.BaseURL,
+		WebhookURL: webhookURL,
 	})
 	handlers := httpapi.NewHandlers(database, svc, tapWebhookSecret)
 
@@ -62,3 +76,13 @@ func New(cfg Config) (*App, error) {
 	return &App{Router: r, DB: database}, nil
 }
 
+func newProvider(cfg Config) (providers.Provider, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.PaymentProvider)) {
+	case "", "tap":
+		return tap.NewProvider(cfg.TapSecretKey), nil
+	case "mock":
+		return mock.NewProvider(cfg.BaseURL), nil
+	default:
+		return nil, fmt.Errorf("unsupported PAYMENT_PROVIDER %q (use tap or mock)", cfg.PaymentProvider)
+	}
+}

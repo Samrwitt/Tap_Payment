@@ -31,7 +31,7 @@ func (h *Handlers) CreateCharge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := h.svc.CreateTapCharge(r.Context(), in)
+	out, err := h.svc.CreateCharge(r.Context(), in)
 	if err != nil {
 		if errors.Is(err, services.ErrInvalidInput) {
 			writeError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())

@@ -9,7 +9,8 @@ services:
       PORT: 8080
       BASE_URL: http://localhost:8080
       SQLITE_PATH: /data/payments.db
-      # Set these in your local environment before testing real Tap charges:
+      PAYMENT_PROVIDER: mock
+      # Set PAYMENT_PROVIDER=tap and TAP_SECRET_KEY for real Tap charges:
       TAP_SECRET_KEY: ""
       TAP_WEBHOOK_SECRET_KEY: ""
       TAP_WEBHOOK_URL: http://localhost:8080/api/payments/webhooks/tap

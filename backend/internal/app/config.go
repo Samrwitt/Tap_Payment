@@ -6,12 +6,13 @@ import (
 )
 
 type Config struct {
-	Port               int
-	BaseURL            string
-	SQLitePath         string
-	TapSecretKey       string
+	Port                int
+	BaseURL             string
+	SQLitePath          string
+	PaymentProvider     string
+	TapSecretKey        string
 	TapWebhookSecretKey string
-	TapWebhookURL      string
+	TapWebhookURL       string
 }
 
 func LoadConfigFromEnv() Config {
@@ -19,6 +20,7 @@ func LoadConfigFromEnv() Config {
 		Port:                envInt("PORT", 8080),
 		BaseURL:             envString("BASE_URL", "http://localhost:8080"),
 		SQLitePath:          envString("SQLITE_PATH", "./data/payments.db"),
+		PaymentProvider:     envString("PAYMENT_PROVIDER", "tap"),
 		TapSecretKey:        envString("TAP_SECRET_KEY", ""),
 		TapWebhookSecretKey: envString("TAP_WEBHOOK_SECRET_KEY", ""),
 		TapWebhookURL:       envString("TAP_WEBHOOK_URL", "http://localhost:8080/api/payments/webhooks/tap"),
