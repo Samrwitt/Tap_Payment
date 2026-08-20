@@ -8,6 +8,8 @@ import (
 type Config struct {
 	Port                int
 	BaseURL             string
+	FrontendURL         string
+	CORSOrigin          string
 	SQLitePath          string
 	PaymentProvider     string
 	AdminAPIKey         string
@@ -18,9 +20,12 @@ type Config struct {
 }
 
 func LoadConfigFromEnv() Config {
+	frontend := envString("FRONTEND_URL", "http://localhost:3000")
 	return Config{
 		Port:                envInt("PORT", 8080),
 		BaseURL:             envString("BASE_URL", "http://localhost:8080"),
+		FrontendURL:         frontend,
+		CORSOrigin:          envString("CORS_ORIGIN", frontend),
 		SQLitePath:          envString("SQLITE_PATH", "./data/payments.db"),
 		PaymentProvider:     envString("PAYMENT_PROVIDER", "mock"),
 		AdminAPIKey:         envString("ADMIN_API_KEY", ""),

@@ -60,11 +60,12 @@ func New(cfg Config) (*App, error) {
 		BaseURL:    cfg.BaseURL,
 		WebhookURL: webhookURL,
 	})
-	handlers := httpapi.NewHandlers(database, svc, tapWebhookSecret, cfg.ChapaSecretKey, cfg.AdminAPIKey)
+	handlers := httpapi.NewHandlers(database, svc, tapWebhookSecret, cfg.ChapaSecretKey, cfg.AdminAPIKey, cfg.FrontendURL)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(corsMiddleware(cfg.CORSOrigin))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
@@ -85,6 +86,24 @@ func New(cfg Config) (*App, error) {
 	})
 
 	return &App{Router: r, DB: database}, nil
+}
+
+func corsMiddleware(origin string) func(http.Handler) http.Handler {
+	if origin == "" {
+		origin = "http://localhost:3000"
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Admin-API-Key, hashstring, x-chapa-signature, Chapa-Signature")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func newProvider(cfg Config) (providers.Provider, error) {

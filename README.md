@@ -8,6 +8,7 @@ Supports **mock** (local demos), **Tap** (GCC-style charges), and **Chapa** (Eth
 | Path | Purpose |
 |------|---------|
 | `backend/` | Go payments API |
+| `frontend/` | Next.js checkout demo (BirrPay) |
 | `openapi/` | OpenAPI contract |
 | `sdk-typescript/` | TypeScript client |
 | `docker-compose.yml` | Local run |
@@ -43,17 +44,26 @@ sequenceDiagram
 
 ## Quick start
 
+### Backend + frontend (recommended demo)
+
 ```bash
 cp backend/.env.example backend/.env
-cd backend
-go run ./cmd/api
+# terminal 1
+cd backend && go run ./cmd/api
+# terminal 2
+cd frontend && npm install && npm run dev
 ```
 
-Or:
+Open `http://localhost:3000` → create a payment → complete mock checkout → land on status page.
+
+Or with Docker:
 
 ```bash
 docker compose up --build
 ```
+
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:8080`
 
 ### Full mock payment flow
 

@@ -29,7 +29,7 @@ func TestTapWebhookIsIdempotentAndUpdatesPayment(t *testing.T) {
 		BaseURL:    "http://localhost:8080",
 		WebhookURL: "http://localhost:8080/api/payments/webhooks/tap",
 	})
-	h := NewHandlers(database, svc, "secret123", "", "admin-secret")
+	h := NewHandlers(database, svc, "secret123", "", "admin-secret", "http://localhost:3000")
 
 	payload := tap.WebhookCharge{}
 	payload.ID = "chg_test_123"

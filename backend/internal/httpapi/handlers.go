@@ -23,15 +23,17 @@ type Handlers struct {
 	tapWebhookSecret string
 	chapaSecret      string
 	adminAPIKey      string
+	frontendURL      string
 }
 
-func NewHandlers(db *sql.DB, svc *services.PaymentService, tapWebhookSecret, chapaSecret, adminAPIKey string) *Handlers {
+func NewHandlers(db *sql.DB, svc *services.PaymentService, tapWebhookSecret, chapaSecret, adminAPIKey, frontendURL string) *Handlers {
 	return &Handlers{
 		db:               db,
 		svc:              svc,
 		tapWebhookSecret: tapWebhookSecret,
 		chapaSecret:      chapaSecret,
 		adminAPIKey:      adminAPIKey,
+		frontendURL:      strings.TrimRight(frontendURL, "/"),
 	}
 }
 
@@ -218,11 +220,22 @@ func (h *Handlers) MockComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_STATE", err.Error())
 		return
 	}
+
+	paymentID := ""
+	_ = h.db.QueryRowContext(r.Context(), `
+		SELECT id FROM payments WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1
+	`, chargeID).Scan(&paymentID)
+
+	redirect := h.frontendURL + "/status/" + paymentID
+	if paymentID == "" {
+		redirect = h.frontendURL + "/"
+	}
+
 	if strings.Contains(r.Header.Get("Accept"), "text/html") || r.Method == http.MethodPost {
-		http.Redirect(w, r, "/payment/return?status=paid&chargeId="+chargeID, http.StatusSeeOther)
+		http.Redirect(w, r, redirect, http.StatusSeeOther)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "chargeId": chargeID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "chargeId": chargeID, "paymentId": paymentID})
 }
 
 func (h *Handlers) PaymentReturn(w http.ResponseWriter, r *http.Request) {
