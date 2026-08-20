@@ -55,3 +55,7 @@ func (p *Provider) CreateCharge(ctx context.Context, req providers.ChargeRequest
 		Raw:              resp,
 	}, nil
 }
+
+func (p *Provider) Refund(ctx context.Context, req providers.RefundRequest) (*providers.RefundResult, error) {
+	return p.client.Refund(ctx, req)
+}

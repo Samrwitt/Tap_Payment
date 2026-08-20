@@ -1,16 +1,18 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"tap-payment/backend/internal/providers/chapa"
 	"tap-payment/backend/internal/providers/tap"
 	"tap-payment/backend/internal/services"
 )
@@ -19,10 +21,18 @@ type Handlers struct {
 	db               *sql.DB
 	svc              *services.PaymentService
 	tapWebhookSecret string
+	chapaSecret      string
+	adminAPIKey      string
 }
 
-func NewHandlers(db *sql.DB, svc *services.PaymentService, tapWebhookSecret string) *Handlers {
-	return &Handlers{db: db, svc: svc, tapWebhookSecret: tapWebhookSecret}
+func NewHandlers(db *sql.DB, svc *services.PaymentService, tapWebhookSecret, chapaSecret, adminAPIKey string) *Handlers {
+	return &Handlers{
+		db:               db,
+		svc:              svc,
+		tapWebhookSecret: tapWebhookSecret,
+		chapaSecret:      chapaSecret,
+		adminAPIKey:      adminAPIKey,
+	}
 }
 
 func (h *Handlers) CreateCharge(w http.ResponseWriter, r *http.Request) {
@@ -63,56 +73,67 @@ func (h *Handlers) TapWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	receivedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	// Idempotency: only process a given charge.id once.
-	eventID := "wev_" + services.RandID()
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO webhook_events (id, provider, event_key, received_at)
-		VALUES (?, 'tap', ?, ?)
-	`, eventID, ch.ID, receivedAt)
+	dup, err := h.svc.ApplyWebhook(r.Context(), services.WebhookUpdate{
+		Provider: "tap",
+		EventKey: ch.ID,
+		Status:   ch.Status,
+		MarkPaid: ch.Status == "CAPTURED",
+		RawJSON:  string(body),
+	})
 	if err != nil {
-		// Only unique-key violations are considered duplicates.
-		if isUniqueConstraintError(err) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to persist webhook event")
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to process webhook")
+		return
+	}
+	if dup {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handlers) ChapaWebhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_BODY", "read body failed")
+		return
+	}
+	defer r.Body.Close()
+
+	sig := headerValue(r.Header, "x-chapa-signature")
+	if sig == "" {
+		sig = headerValue(r.Header, "Chapa-Signature")
+	}
+	if !chapa.VerifyWebhookSignature(h.chapaSecret, body, sig) {
+		writeError(w, http.StatusUnauthorized, "INVALID_SIGNATURE", "invalid webhook signature")
 		return
 	}
 
-	// Update payment by provider_payment_id (charge id)
-	status := strings.ToLower(ch.Status)
-	updatedAt := receivedAt
-	raw := string(body)
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE payments SET status=?, raw_last_event=?, updated_at=?
-		WHERE provider='tap' AND provider_payment_id=?
-	`, status, raw, updatedAt, ch.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update payment status")
+	var payload chapa.WebhookPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid json")
+		return
+	}
+	if payload.TxRef == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_INPUT", "tx_ref required")
 		return
 	}
 
-	// If captured, mark order paid (best effort).
-	if ch.Status == "CAPTURED" {
-		_, err = h.db.ExecContext(r.Context(), `
-			UPDATE orders SET status='paid', updated_at=?
-			WHERE id IN (SELECT order_id FROM payments WHERE provider='tap' AND provider_payment_id=?)
-		`, updatedAt, ch.ID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update order status")
-			return
-		}
-	}
-
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE webhook_events SET processed_at=? WHERE provider='tap' AND event_key=?
-	`, updatedAt, ch.ID)
+	markPaid := strings.EqualFold(payload.Status, "success") || strings.EqualFold(payload.Status, "successful")
+	dup, err := h.svc.ApplyWebhook(r.Context(), services.WebhookUpdate{
+		Provider: "chapa",
+		EventKey: payload.TxRef,
+		Status:   payload.Status,
+		MarkPaid: markPaid,
+		RawJSON:  string(body),
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark webhook as processed")
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to process webhook")
 		return
 	}
-
+	if dup {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -129,20 +150,94 @@ func (h *Handlers) GetPayment(w http.ResponseWriter, r *http.Request) {
 	`, paymentID)
 
 	var out struct {
-		ID              string `json:"id"`
-		OrderID         string `json:"orderId"`
-		Provider        string `json:"provider"`
-		ProviderID      string `json:"providerPaymentId"`
-		Status          string `json:"status"`
-		RedirectURL     string `json:"redirectUrl,omitempty"`
-		CreatedAt       string `json:"createdAt"`
-		UpdatedAt       string `json:"updatedAt"`
+		ID          string `json:"id"`
+		OrderID     string `json:"orderId"`
+		Provider    string `json:"provider"`
+		ProviderID  string `json:"providerPaymentId"`
+		Status      string `json:"status"`
+		RedirectURL string `json:"redirectUrl,omitempty"`
+		CreatedAt   string `json:"createdAt"`
+		UpdatedAt   string `json:"updatedAt"`
 	}
 	if err := row.Scan(&out.ID, &out.OrderID, &out.Provider, &out.ProviderID, &out.Status, &out.RedirectURL, &out.CreatedAt, &out.UpdatedAt); err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) RefundPayment(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeAdmin(r) {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid X-Admin-API-Key required")
+		return
+	}
+
+	paymentID := chi.URLParam(r, "paymentId")
+	var in services.RefundInput
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(w, r, &in); err != nil {
+			return
+		}
+	}
+
+	out, err := h.svc.RefundPayment(r.Context(), paymentID, in)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrNotFound):
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "payment not found")
+		case errors.Is(err, services.ErrInvalidState):
+			writeError(w, http.StatusConflict, "INVALID_STATE", err.Error())
+		case errors.Is(err, services.ErrProviderUnsupported):
+			writeError(w, http.StatusNotImplemented, "NOT_SUPPORTED", err.Error())
+		default:
+			writeError(w, http.StatusBadGateway, "PROVIDER_ERROR", "refund failed")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) MockCheckoutPage(w http.ResponseWriter, r *http.Request) {
+	chargeID := chi.URLParam(r, "chargeId")
+	safeID := html.EscapeString(chargeID)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<!doctype html>
+<html><head><title>Mock Checkout</title></head>
+<body style="font-family:sans-serif;max-width:480px;margin:3rem auto;">
+  <h1>Mock Checkout</h1>
+  <p>Charge: <code>` + safeID + `</code></p>
+  <form method="POST" action="/mock/checkout/` + safeID + `/complete">
+    <button type="submit">Pay successfully</button>
+  </form>
+</body></html>`))
+}
+
+func (h *Handlers) MockComplete(w http.ResponseWriter, r *http.Request) {
+	chargeID := chi.URLParam(r, "chargeId")
+	if err := h.svc.CompleteMockPayment(r.Context(), chargeID); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_STATE", err.Error())
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/html") || r.Method == http.MethodPost {
+		http.Redirect(w, r, "/payment/return?status=paid&chargeId="+chargeID, http.StatusSeeOther)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "chargeId": chargeID})
+}
+
+func (h *Handlers) PaymentReturn(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	status := html.EscapeString(r.URL.Query().Get("status"))
+	_, _ = w.Write([]byte(`<!doctype html><html><body style="font-family:sans-serif;margin:3rem;">
+	<h1>Payment return</h1><p>Status: ` + status + `</p></body></html>`))
+}
+
+func (h *Handlers) authorizeAdmin(r *http.Request) bool {
+	if h.adminAPIKey == "" {
+		return false
+	}
+	got := r.Header.Get("X-Admin-API-Key")
+	return subtle.ConstantTimeCompare([]byte(got), []byte(h.adminAPIKey)) == 1
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -175,15 +270,8 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func headerValue(h http.Header, key string) string {
-	// net/http canonicalizes header names; try direct then canonical.
 	if v := h.Get(key); v != "" {
 		return v
 	}
 	return h.Get(http.CanonicalHeaderKey(key))
 }
-
-func isUniqueConstraintError(err error) bool {
-	// modernc sqlite returns driver errors as strings containing this phrase.
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
-}
-

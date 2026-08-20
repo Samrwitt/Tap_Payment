@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"tap-payment/backend/internal/providers"
 )
 
 type Client struct {
@@ -112,5 +114,65 @@ func (c *Client) CreateCharge(ctx context.Context, req CreateChargeRequest) (*Cr
 	}
 
 	return &out, nil
+}
+
+type refundAPIRequest struct {
+	ChargeID string  `json:"charge_id"`
+	Amount   float64 `json:"amount,omitempty"`
+	Currency string  `json:"currency,omitempty"`
+	Reason   string  `json:"reason,omitempty"`
+}
+
+type refundAPIResponse struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	Response *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"response,omitempty"`
+}
+
+func (c *Client) Refund(ctx context.Context, req providers.RefundRequest) (*providers.RefundResult, error) {
+	if c.secretKey == "" {
+		return nil, fmt.Errorf("tap secret key is empty")
+	}
+	body, err := json.Marshal(refundAPIRequest{
+		ChargeID: req.ProviderChargeID,
+		Amount:   req.Amount,
+		Currency: req.Currency,
+		Reason:   req.Reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.tap.company/v2/refunds", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.secretKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("tap refund http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var out refundAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("tap refund decode: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := ""
+		if out.Response != nil {
+			msg = out.Response.Message
+		}
+		return nil, fmt.Errorf("tap refund failed: status=%d message=%s", resp.StatusCode, msg)
+	}
+	return &providers.RefundResult{
+		ProviderRefundID: out.ID,
+		Status:           out.Status,
+		Raw:              out,
+	}, nil
 }
 

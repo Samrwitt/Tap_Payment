@@ -1,17 +1,22 @@
 import type {
+  ChapaWebhookPayload,
   CreateChargeRequest,
   CreateChargeResponse,
+  CustomerInput,
   ErrorResponse,
   GetPaymentResponse,
+  MetadataMap,
   PhoneInput,
+  RefundRequest,
+  RefundResponse,
   TapChargeWebhookPayload,
   WebhookDuplicateResponse,
   WebhookOkResponse,
 } from "./types";
-import type { MetadataMap, CustomerInput } from "./types";
 
 export type ApiClientOptions = {
   baseUrl: string;
+  adminApiKey?: string;
   fetchImpl?: typeof fetch;
 };
 
@@ -29,7 +34,14 @@ export function createApiClient(options: ApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   async function request<T>(path: string, init: RequestInit): Promise<T> {
-    const res = await fetchImpl(options.baseUrl.replace(/\/$/, "") + path, init);
+    const headers = new Headers(init.headers);
+    if (options.adminApiKey && !headers.has("X-Admin-API-Key")) {
+      headers.set("X-Admin-API-Key", options.adminApiKey);
+    }
+    const res = await fetchImpl(options.baseUrl.replace(/\/$/, "") + path, {
+      ...init,
+      headers,
+    });
     const contentType = res.headers.get("content-type") ?? "";
 
     if (!res.ok) {
@@ -49,7 +61,6 @@ export function createApiClient(options: ApiClientOptions) {
     if (contentType.includes("application/json")) {
       return (await res.json()) as T;
     }
-    // For safety; our API should be JSON for all non-200s.
     return (await res.text()) as unknown as T;
   }
 
@@ -76,15 +87,48 @@ export function createApiClient(options: ApiClientOptions) {
       });
     },
 
+    async chapaWebhook(params: {
+      signature: string;
+      body: ChapaWebhookPayload;
+    }): Promise<WebhookOkResponse | WebhookDuplicateResponse> {
+      return request<WebhookOkResponse | WebhookDuplicateResponse>("/api/payments/webhooks/chapa", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-chapa-signature": params.signature,
+        },
+        body: JSON.stringify(params.body),
+      });
+    },
+
     async getPayment(paymentId: string): Promise<GetPaymentResponse> {
       const encoded = encodeURIComponent(paymentId);
       return request<GetPaymentResponse>(`/api/payments/${encoded}`, {
         method: "GET",
       });
     },
+
+    async refundPayment(paymentId: string, body: RefundRequest = {}): Promise<RefundResponse> {
+      const encoded = encodeURIComponent(paymentId);
+      return request<RefundResponse>(`/api/payments/${encoded}/refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    },
   };
 }
 
-// Re-export commonly used input types so app code doesn't need to import from two places.
-export type { CreateChargeRequest, CreateChargeResponse, TapChargeWebhookPayload, GetPaymentResponse, ErrorResponse, PhoneInput, MetadataMap, CustomerInput };
-
+export type {
+  CreateChargeRequest,
+  CreateChargeResponse,
+  TapChargeWebhookPayload,
+  ChapaWebhookPayload,
+  GetPaymentResponse,
+  RefundRequest,
+  RefundResponse,
+  ErrorResponse,
+  PhoneInput,
+  MetadataMap,
+  CustomerInput,
+};

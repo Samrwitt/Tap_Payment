@@ -1,35 +1,27 @@
 # Tap Payments SDK (TypeScript)
 
-This is a manual SDK matching `openapi/payments.yaml`.
+Manual SDK matching `openapi/payments.yaml`.
 
 ## Usage
 
 ```ts
-import { createApiClient } from "@tap-payment/sdk";
+import { createApiClient } from "./src";
 
-const api = createApiClient({ baseUrl: "http://localhost:8080" });
+const api = createApiClient({
+  baseUrl: "http://localhost:8080",
+  adminApiKey: "dev-admin-key",
+});
 
 const payment = await api.createCharge({
   orderId: "ord_001",
-  amount: 1.0,
-  currency: "SAR",
+  amount: 100,
+  currency: "ETB",
   customer: {
-    firstName: "Test",
-    lastName: "User",
-    email: "test@example.com",
-    phone: { countryCode: "966", number: "51234567" },
+    firstName: "Abebe",
+    phone: { countryCode: "251", number: "911234567" },
   },
 });
 
-// payment.redirectUrl -> redirect the customer to complete payment
+await api.getPayment(payment.paymentId);
+await api.refundPayment(payment.paymentId, { reason: "customer request" });
 ```
-
-## Webhook (server-side)
-
-```ts
-await api.tapWebhook({
-  hashstring: "<value from Tap header>",
-  body: <Tap payload you received>,
-});
-```
-

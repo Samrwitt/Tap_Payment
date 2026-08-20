@@ -65,3 +65,23 @@ export type GetPaymentResponse = {
   updatedAt: string;
 };
 
+export type RefundRequest = {
+  amount?: number;
+  reason?: string;
+};
+
+export type RefundResponse = {
+  paymentId: string;
+  provider: string;
+  providerRefundId: string;
+  status: string;
+};
+
+export type ChapaWebhookPayload = {
+  tx_ref: string;
+  status: string;
+  reference?: string;
+  amount?: unknown;
+  currency?: string;
+};
+

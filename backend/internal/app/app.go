@@ -14,6 +14,7 @@ import (
 	"tap-payment/backend/internal/db"
 	"tap-payment/backend/internal/httpapi"
 	"tap-payment/backend/internal/providers"
+	"tap-payment/backend/internal/providers/chapa"
 	"tap-payment/backend/internal/providers/mock"
 	"tap-payment/backend/internal/providers/tap"
 	"tap-payment/backend/internal/services"
@@ -45,16 +46,21 @@ func New(cfg Config) (*App, error) {
 		tapWebhookSecret = cfg.TapSecretKey
 	}
 
-	webhookURL := cfg.TapWebhookURL
+	webhookURL := cfg.WebhookURL
 	if webhookURL == "" {
-		webhookURL = cfg.BaseURL + "/api/payments/webhooks/tap"
+		switch provider.Name() {
+		case "chapa":
+			webhookURL = cfg.BaseURL + "/api/payments/webhooks/chapa"
+		default:
+			webhookURL = cfg.BaseURL + "/api/payments/webhooks/tap"
+		}
 	}
 
 	svc := services.NewPaymentService(database, provider, services.PaymentServiceConfig{
 		BaseURL:    cfg.BaseURL,
 		WebhookURL: webhookURL,
 	})
-	handlers := httpapi.NewHandlers(database, svc, tapWebhookSecret)
+	handlers := httpapi.NewHandlers(database, svc, tapWebhookSecret, cfg.ChapaSecretKey, cfg.AdminAPIKey)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -66,11 +72,16 @@ func New(cfg Config) (*App, error) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	r.Get("/payment/return", handlers.PaymentReturn)
+	r.Get("/mock/checkout/{chargeId}", handlers.MockCheckoutPage)
+	r.Post("/mock/checkout/{chargeId}/complete", handlers.MockComplete)
 
 	r.Route("/api/payments", func(r chi.Router) {
 		r.Post("/charges", handlers.CreateCharge)
 		r.Post("/webhooks/tap", handlers.TapWebhook)
+		r.Post("/webhooks/chapa", handlers.ChapaWebhook)
 		r.Get("/{paymentId}", handlers.GetPayment)
+		r.Post("/{paymentId}/refund", handlers.RefundPayment)
 	})
 
 	return &App{Router: r, DB: database}, nil
@@ -82,7 +93,9 @@ func newProvider(cfg Config) (providers.Provider, error) {
 		return tap.NewProvider(cfg.TapSecretKey), nil
 	case "mock":
 		return mock.NewProvider(cfg.BaseURL), nil
+	case "chapa":
+		return chapa.NewProvider(cfg.ChapaSecretKey), nil
 	default:
-		return nil, fmt.Errorf("unsupported PAYMENT_PROVIDER %q (use tap or mock)", cfg.PaymentProvider)
+		return nil, fmt.Errorf("unsupported PAYMENT_PROVIDER %q (use tap, mock, or chapa)", cfg.PaymentProvider)
 	}
 }

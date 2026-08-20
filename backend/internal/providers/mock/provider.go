@@ -40,6 +40,20 @@ func (p *Provider) CreateCharge(_ context.Context, req providers.ChargeRequest) 
 	}, nil
 }
 
+func (p *Provider) Refund(_ context.Context, req providers.RefundRequest) (*providers.RefundResult, error) {
+	n := p.seq.Add(1)
+	return &providers.RefundResult{
+		ProviderRefundID: fmt.Sprintf("mock_rf_%d", n),
+		Status:           "REFUNDED",
+		Raw: map[string]any{
+			"chargeId": req.ProviderChargeID,
+			"amount":   req.Amount,
+			"currency": req.Currency,
+			"status":   "REFUNDED",
+		},
+	}, nil
+}
+
 func trimTrailingSlash(s string) string {
 	if len(s) > 0 && s[len(s)-1] == '/' {
 		return s[:len(s)-1]

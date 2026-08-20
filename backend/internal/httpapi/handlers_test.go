@@ -5,23 +5,32 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	dbpkg "tap-payment/backend/internal/db"
+	"tap-payment/backend/internal/providers/mock"
 	"tap-payment/backend/internal/providers/tap"
+	"tap-payment/backend/internal/services"
 )
 
 func TestTapWebhookIsIdempotentAndUpdatesPayment(t *testing.T) {
-	database := openTestDB(t)
+	database, err := dbpkg.OpenAndMigrate(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
 	defer database.Close()
 
 	seedPayment(t, database, "ord_1", "pay_1", "chg_test_123")
 
-	h := NewHandlers(database, nil, "secret123")
+	svc := services.NewPaymentService(database, mock.NewProvider("http://localhost:8080"), services.PaymentServiceConfig{
+		BaseURL:    "http://localhost:8080",
+		WebhookURL: "http://localhost:8080/api/payments/webhooks/tap",
+	})
+	h := NewHandlers(database, svc, "secret123", "", "admin-secret")
+
 	payload := tap.WebhookCharge{}
 	payload.ID = "chg_test_123"
 	payload.Object = "charge"
@@ -92,17 +101,6 @@ func TestTapWebhookIsIdempotentAndUpdatesPayment(t *testing.T) {
 	}
 }
 
-func openTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	database, err := dbpkg.OpenAndMigrate(dbPath)
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	return database
-}
-
 func seedPayment(t *testing.T, db *sql.DB, orderID, paymentID, providerPaymentID string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -122,9 +120,3 @@ func seedPayment(t *testing.T, db *sql.DB, orderID, paymentID, providerPaymentID
 		t.Fatalf("insert payment: %v", err)
 	}
 }
-
-func TestMain(m *testing.M) {
-	code := m.Run()
-	os.Exit(code)
-}
-
