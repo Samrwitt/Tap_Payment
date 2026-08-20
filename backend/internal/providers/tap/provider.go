@@ -59,3 +59,11 @@ func (p *Provider) CreateCharge(ctx context.Context, req providers.ChargeRequest
 func (p *Provider) Refund(ctx context.Context, req providers.RefundRequest) (*providers.RefundResult, error) {
 	return p.client.Refund(ctx, req)
 }
+
+func (p *Provider) SavePaymentMethod(_ context.Context, _ providers.SaveMethodRequest) (*providers.SavedMethodResult, error) {
+	return nil, fmt.Errorf("%w: enable Tap save_card / payment agreements in a follow-up", providers.ErrNotSupported)
+}
+
+func (p *Provider) OneTapCharge(_ context.Context, _ providers.OneTapChargeRequest) (*providers.ChargeResult, error) {
+	return nil, fmt.Errorf("%w: Tap one-tap requires a saved card token", providers.ErrNotSupported)
+}

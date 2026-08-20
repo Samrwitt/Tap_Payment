@@ -79,6 +79,9 @@ func New(cfg Config) (*App, error) {
 
 	r.Route("/api/payments", func(r chi.Router) {
 		r.Post("/charges", handlers.CreateCharge)
+		r.Post("/methods", handlers.SavePaymentMethod)
+		r.Get("/methods", handlers.ListPaymentMethods)
+		r.Post("/one-tap", handlers.OneTapPay)
 		r.Post("/webhooks/tap", handlers.TapWebhook)
 		r.Post("/webhooks/chapa", handlers.ChapaWebhook)
 		r.Get("/{paymentId}", handlers.GetPayment)

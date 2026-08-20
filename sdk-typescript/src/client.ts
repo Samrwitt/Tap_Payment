@@ -6,9 +6,12 @@ import type {
   ErrorResponse,
   GetPaymentResponse,
   MetadataMap,
+  OneTapRequest,
+  PaymentMethod,
   PhoneInput,
   RefundRequest,
   RefundResponse,
+  SaveMethodRequest,
   TapChargeWebhookPayload,
   WebhookDuplicateResponse,
   WebhookOkResponse,
@@ -108,6 +111,29 @@ export function createApiClient(options: ApiClientOptions) {
       });
     },
 
+    async savePaymentMethod(body: SaveMethodRequest): Promise<PaymentMethod> {
+      return request<PaymentMethod>("/api/payments/methods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    },
+
+    async listPaymentMethods(customerKey: string): Promise<{ methods: PaymentMethod[] }> {
+      return request<{ methods: PaymentMethod[] }>(
+        `/api/payments/methods?customerKey=${encodeURIComponent(customerKey)}`,
+        { method: "GET" },
+      );
+    },
+
+    async oneTapPay(body: OneTapRequest): Promise<CreateChargeResponse> {
+      return request<CreateChargeResponse>("/api/payments/one-tap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    },
+
     async refundPayment(paymentId: string, body: RefundRequest = {}): Promise<RefundResponse> {
       const encoded = encodeURIComponent(paymentId);
       return request<RefundResponse>(`/api/payments/${encoded}/refund`, {
@@ -127,6 +153,9 @@ export type {
   GetPaymentResponse,
   RefundRequest,
   RefundResponse,
+  SaveMethodRequest,
+  PaymentMethod,
+  OneTapRequest,
   ErrorResponse,
   PhoneInput,
   MetadataMap,

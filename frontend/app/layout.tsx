@@ -13,8 +13,8 @@ const body = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "BirrPay — Ethiopia-ready payments",
-  description: "Demo checkout for the Tap Payment Ethiopia-ready backend",
+  title: "BirrPay — One-tap payments",
+  description: "One-tap Ethiopia-ready payments demo",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="brand">
               Birr<em>Pay</em>
             </div>
-            <div className="topbar-meta">Ethiopia-ready checkout demo</div>
+            <div className="topbar-meta">One-tap Ethiopia payments</div>
           </header>
           <main>{children}</main>
           <footer className="footer">Built on the monorepo Go API · mock / tap / chapa providers</footer>

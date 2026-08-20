@@ -123,6 +123,14 @@ func (p *Provider) Refund(_ context.Context, _ providers.RefundRequest) (*provid
 	return nil, fmt.Errorf("%w: chapa refunds are not wired in this demo", providers.ErrNotSupported)
 }
 
+func (p *Provider) SavePaymentMethod(_ context.Context, _ providers.SaveMethodRequest) (*providers.SavedMethodResult, error) {
+	return nil, fmt.Errorf("%w: chapa one-tap enrollment not wired yet", providers.ErrNotSupported)
+}
+
+func (p *Provider) OneTapCharge(_ context.Context, _ providers.OneTapChargeRequest) (*providers.ChargeResult, error) {
+	return nil, fmt.Errorf("%w: chapa one-tap charge not wired yet", providers.ErrNotSupported)
+}
+
 // VerifyWebhookSignature validates Chapa webhook authenticity (HMAC-SHA256 of raw body).
 func VerifyWebhookSignature(secret string, rawBody []byte, signatureHeader string) bool {
 	signatureHeader = strings.TrimSpace(signatureHeader)

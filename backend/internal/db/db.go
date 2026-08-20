@@ -58,6 +58,18 @@ func migrate(db *sql.DB) error {
 			processed_at TEXT,
 			UNIQUE(provider, event_key)
 		);`,
+		`CREATE TABLE IF NOT EXISTS payment_methods (
+			id TEXT PRIMARY KEY,
+			customer_key TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			provider_token TEXT NOT NULL,
+			label TEXT NOT NULL,
+			brand TEXT,
+			last4 TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_payment_methods_customer ON payment_methods(customer_key);`,
 	}
 
 	for _, s := range stmts {

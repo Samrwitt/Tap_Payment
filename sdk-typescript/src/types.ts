@@ -77,6 +77,31 @@ export type RefundResponse = {
   status: string;
 };
 
+export type SaveMethodRequest = {
+  customerKey?: string;
+  methodType: "wallet" | "card";
+  cardNumber?: string;
+  customer: CustomerInput;
+};
+
+export type PaymentMethod = {
+  id: string;
+  customerKey: string;
+  provider: string;
+  label: string;
+  brand?: string;
+  last4?: string;
+  createdAt: string;
+};
+
+export type OneTapRequest = {
+  orderId: string;
+  amount: number;
+  currency: string;
+  paymentMethodId: string;
+  metadata?: MetadataMap;
+};
+
 export type ChapaWebhookPayload = {
   tx_ref: string;
   status: string;

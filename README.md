@@ -1,50 +1,49 @@
 # Tap Payment (Ethiopia-ready) — Monorepo
 
-Provider-agnostic payments platform: Go backend + OpenAPI + TypeScript SDK.
-Supports **mock** (local demos), **Tap** (GCC-style charges), and **Chapa** (Ethiopia / ETB).
+**Primary UX: one-tap payments** — save a method once, then pay with a single button (no redirect).
+
+Also supports classic redirect checkout for Tap/Chapa when needed.
 
 ## Repo layout
 
 | Path | Purpose |
 |------|---------|
 | `backend/` | Go payments API |
-| `frontend/` | Next.js checkout demo (BirrPay) |
+| `frontend/` | Next.js one-tap demo (BirrPay) |
 | `openapi/` | OpenAPI contract |
 | `sdk-typescript/` | TypeScript client |
 | `docker-compose.yml` | Local run |
 | `.github/workflows/ci.yml` | CI tests |
 
-## Architecture
+## Architecture (one-tap)
 
 ```mermaid
 sequenceDiagram
-  participant App as ClientApp
+  participant App as BirrPayUI
   participant API as GoBackend
   participant Prov as Provider
   participant DB as SQLite
 
-  App->>API: POST /api/payments/charges
-  API->>DB: order + payment (pending)
-  API->>Prov: CreateCharge
-  Prov-->>API: redirectUrl
-  API-->>App: paymentId + redirectUrl
-  App->>Prov: customer pays
-  Prov->>API: webhook (tap/chapa) or mock complete
-  API->>DB: idempotent paid update
-  App->>API: GET payment / optional refund
+  App->>API: POST /api/payments/methods
+  API->>Prov: SavePaymentMethod
+  Prov-->>API: token
+  API->>DB: store payment method
+  App->>API: POST /api/payments/one-tap
+  API->>Prov: OneTapCharge(token)
+  Prov-->>API: CAPTURED (no redirect)
+  API->>DB: mark order paid
+  API-->>App: payment status
 ```
 
 ### Providers (`PAYMENT_PROVIDER`)
 
-| Value | Use |
-|-------|-----|
-| `mock` | Local demo with HTML checkout (no keys) |
-| `tap` | Tap Payments create-charge + hashstring webhooks |
-| `chapa` | Ethiopian Chapa initialize + signed webhooks |
+| Value | One-tap | Redirect checkout |
+|-------|---------|-------------------|
+| `mock` | Yes (demo) | Yes |
+| `tap` | Stub (needs saved-card) | Yes |
+| `chapa` | Stub (future) | Yes |
 
 ## Quick start
-
-### Backend + frontend (recommended demo)
 
 ```bash
 cp backend/.env.example backend/.env
@@ -54,86 +53,27 @@ cd backend && go run ./cmd/api
 cd frontend && npm install && npm run dev
 ```
 
-Open `http://localhost:3000` → create a payment → complete mock checkout → land on status page.
+Open `http://localhost:3000`:
 
-Or with Docker:
-
-```bash
-docker compose up --build
-```
-
-- Frontend: `http://localhost:3000`
-- API: `http://localhost:8080`
-
-### Full mock payment flow
-
-```bash
-# 1) Create charge
-curl -sS -X POST http://localhost:8080/api/payments/charges \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "orderId":"ord_001",
-    "amount":100,
-    "currency":"ETB",
-    "customer":{
-      "firstName":"Abebe",
-      "lastName":"Kebede",
-      "email":"abebe@example.com",
-      "phone":{"countryCode":"251","number":"911234567"}
-    }
-  }'
-
-# 2) Open redirectUrl in a browser and click "Pay successfully"
-# 3) Check status
-curl -sS http://localhost:8080/api/payments/<paymentId>
-
-# 4) Refund (admin)
-curl -sS -X POST http://localhost:8080/api/payments/<paymentId>/refund \
-  -H 'Content-Type: application/json' \
-  -H 'X-Admin-API-Key: dev-admin-key' \
-  -d '{}'
-```
+1. **Enable one-tap** (save wallet/card once)
+2. Tap **Pay … · one tap**
+3. Land on status as `CAPTURED` / paid
 
 ## API
 
-- `POST /api/payments/charges`
+One-tap:
+- `POST /api/payments/methods` — save payment method
+- `GET /api/payments/methods?customerKey=...` — list methods
+- `POST /api/payments/one-tap` — charge with saved method (no redirect)
+
+Also available:
+- `POST /api/payments/charges` — classic redirect checkout
 - `GET /api/payments/{paymentId}`
-- `POST /api/payments/{paymentId}/refund` (requires `X-Admin-API-Key`)
-- `POST /api/payments/webhooks/tap`
-- `POST /api/payments/webhooks/chapa`
-- `GET /mock/checkout/{chargeId}` + `POST .../complete` (mock only)
-
-## TypeScript SDK
-
-```ts
-import { createApiClient } from "./sdk-typescript/src";
-
-const api = createApiClient({
-  baseUrl: "http://localhost:8080",
-  adminApiKey: "dev-admin-key",
-});
-```
-
-## Design notes
-
-- **Go** for a stable concurrent payments core.
-- **Provider interface** so Ethiopia (Chapa) and GCC (Tap) share one app API.
-- **Honest Ethiopia stance**: Tap merchant onboarding is GCC-focused; Chapa is the local settlement path.
-- **SQLite** for easy demos; Postgres can replace later without changing the public API.
+- `POST /api/payments/{paymentId}/refund` (`X-Admin-API-Key`)
+- Tap/Chapa webhooks
 
 ## Tests
 
 ```bash
 cd backend && go test ./...
 ```
-
-## Status
-
-- [x] Charge + webhooks + status
-- [x] Validation / structured errors / idempotency tests
-- [x] OpenAPI + TypeScript SDK
-- [x] Docker + CI
-- [x] Provider interface (`mock`, `tap`, `chapa`)
-- [x] Mock checkout completion
-- [x] Refunds + admin API key
-- [ ] Optional later: Postgres, Telebirr, reconciliation workers

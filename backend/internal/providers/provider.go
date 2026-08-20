@@ -8,11 +8,12 @@ import (
 var ErrNotSupported = errors.New("operation not supported by provider")
 
 // Provider is the app-facing payment gateway contract.
-// Tap / mock / Chapa implement this so the public API stays stable.
 type Provider interface {
 	Name() string
 	CreateCharge(ctx context.Context, req ChargeRequest) (*ChargeResult, error)
 	Refund(ctx context.Context, req RefundRequest) (*RefundResult, error)
+	SavePaymentMethod(ctx context.Context, req SaveMethodRequest) (*SavedMethodResult, error)
+	OneTapCharge(ctx context.Context, req OneTapChargeRequest) (*ChargeResult, error)
 }
 
 type ChargeRequest struct {
@@ -57,4 +58,32 @@ type RefundResult struct {
 	ProviderRefundID string
 	Status           string
 	Raw              any
+}
+
+// SaveMethodRequest enrolls a reusable payment method for later one-tap charges.
+type SaveMethodRequest struct {
+	CustomerKey string
+	Customer    Customer
+	// MethodType: "wallet" (phone/Telebirr-style) or "card"
+	MethodType string
+	// CardNumber is only used by mock for last4 display; never store full PAN.
+	CardNumber string
+}
+
+type SavedMethodResult struct {
+	ProviderToken string
+	Label         string
+	Brand         string
+	Last4         string
+	Raw           any
+}
+
+type OneTapChargeRequest struct {
+	PaymentID     string
+	OrderID       string
+	Amount        float64
+	Currency      string
+	ProviderToken string
+	CustomerKey   string
+	Metadata      map[string]string
 }

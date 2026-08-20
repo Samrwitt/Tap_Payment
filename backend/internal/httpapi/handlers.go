@@ -55,6 +55,64 @@ func (h *Handlers) CreateCharge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (h *Handlers) SavePaymentMethod(w http.ResponseWriter, r *http.Request) {
+	var in services.SaveMethodInput
+	if err := decodeJSON(w, r, &in); err != nil {
+		return
+	}
+	out, err := h.svc.SavePaymentMethod(r.Context(), in)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		case errors.Is(err, services.ErrProviderUnsupported):
+			writeError(w, http.StatusNotImplemented, "NOT_SUPPORTED", err.Error())
+		default:
+			writeError(w, http.StatusBadGateway, "PROVIDER_ERROR", "failed to save payment method")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) ListPaymentMethods(w http.ResponseWriter, r *http.Request) {
+	customerKey := strings.TrimSpace(r.URL.Query().Get("customerKey"))
+	out, err := h.svc.ListPaymentMethods(r.Context(), customerKey)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list payment methods")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"methods": out})
+}
+
+func (h *Handlers) OneTapPay(w http.ResponseWriter, r *http.Request) {
+	var in services.OneTapInput
+	if err := decodeJSON(w, r, &in); err != nil {
+		return
+	}
+	out, err := h.svc.OneTapPay(r.Context(), in)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		case errors.Is(err, services.ErrNotFound):
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "payment method not found")
+		case errors.Is(err, services.ErrInvalidState):
+			writeError(w, http.StatusConflict, "INVALID_STATE", err.Error())
+		case errors.Is(err, services.ErrProviderUnsupported):
+			writeError(w, http.StatusNotImplemented, "NOT_SUPPORTED", err.Error())
+		default:
+			writeError(w, http.StatusBadGateway, "PROVIDER_ERROR", "one-tap payment failed")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *Handlers) TapWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
